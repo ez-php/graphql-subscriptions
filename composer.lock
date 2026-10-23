@@ -188,16 +188,16 @@
         },
         {
             "name": "ez-php/graphql",
-            "version": "2.5.9",
+            "version": "2.5.10",
             "source": {
                 "type": "git",
                 "url": "https://github.com/ez-php/graphql.git",
-                "reference": "06464f8e64793938d5102a9fc838f92e0f2b3f0a"
+                "reference": "45e331b074bfed043a2b83a02256e3888a02b7d3"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/ez-php/graphql/zipball/06464f8e64793938d5102a9fc838f92e0f2b3f0a",
-                "reference": "06464f8e64793938d5102a9fc838f92e0f2b3f0a",
+                "url": "https://api.github.com/repos/ez-php/graphql/zipball/45e331b074bfed043a2b83a02256e3888a02b7d3",
+                "reference": "45e331b074bfed043a2b83a02256e3888a02b7d3",
                 "shasum": ""
             },
             "require": {
@@ -250,7 +250,7 @@
                 "issues": "https://github.com/ez-php/graphql/issues",
                 "source": "https://github.com/ez-php/graphql"
             },
-            "time": "2026-10-20T21:07:32+00:00"
+            "time": "2026-10-23T22:05:51+00:00"
         },
         {
             "name": "ez-php/http",
