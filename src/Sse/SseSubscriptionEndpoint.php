@@ -118,24 +118,21 @@ final readonly class SseSubscriptionEndpoint
         $subscriber = ($this->subscribers)();
         $subscriber->subscribe('*');
         $deadline = $this->maxSeconds > 0 ? microtime(true) + $this->maxSeconds : null;
+        $heartbeat = (float) max(1, $this->heartbeatSeconds);
+        // The heartbeat measures silence on the SSE stream, not on Redis: PSUBSCRIBE * also
+        // delivers events for other channels, which must not hold back the ping.
+        $lastEmit = microtime(true);
 
         try {
             while ($deadline === null || microtime(true) < $deadline) {
-                $wait = (float) max(1, $this->heartbeatSeconds);
+                $now = microtime(true);
+                $wait = max(0.0, $lastEmit + $heartbeat - $now);
 
                 if ($deadline !== null) {
-                    $wait = min($wait, max(0.0, $deadline - microtime(true)));
+                    $wait = min($wait, max(0.0, $deadline - $now));
                 }
 
-                $messages = $subscriber->read($wait);
-
-                if ($messages === []) {
-                    yield new SseEvent('{}', 'ping');
-
-                    continue;
-                }
-
-                foreach ($messages as $message) {
+                foreach ($subscriber->read($wait) as $message) {
                     $decoded = RedisBroadcastRelay::decode($message['message']);
 
                     if ($decoded !== null) {
@@ -145,10 +142,16 @@ final readonly class SseSubscriptionEndpoint
 
                 foreach ($this->translate($conn, $done) as $event) {
                     yield $event;
+                    $lastEmit = microtime(true);
                 }
 
                 if ($done) {
                     return;
+                }
+
+                if (microtime(true) - $lastEmit >= $heartbeat) {
+                    yield new SseEvent('{}', 'ping');
+                    $lastEmit = microtime(true);
                 }
             }
 

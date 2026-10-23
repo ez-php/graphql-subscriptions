@@ -82,6 +82,22 @@ final class SubscriptionRedisSubscriberTest extends TestCase
         $subscriber->read(0.5);
     }
 
+    public function test_a_connection_closed_mid_frame_throws_instead_of_spinning(): void
+    {
+        $subscriber = $this->fake->connect();
+        $this->fake->write(SubscriptionFakeRedisServer::pmessage('*', 'a', 'complete'));
+        $this->fake->write(substr(SubscriptionFakeRedisServer::pmessage('*', 'b', 'cut-off'), 0, 12));
+        $this->fake->closeClient();
+        usleep(50_000);
+
+        // The complete frame is still delivered; the partial one can never finish.
+        $this->assertSame([['channel' => 'a', 'message' => 'complete']], $subscriber->read(0.5));
+
+        $this->expectException(SubscriptionException::class);
+        $this->expectExceptionMessage('Redis closed the subscriber connection.');
+        $subscriber->read(0.5);
+    }
+
     public function test_unreachable_server_throws(): void
     {
         $port = $this->fake->port();

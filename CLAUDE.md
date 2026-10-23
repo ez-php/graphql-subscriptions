@@ -301,9 +301,9 @@ tests/
 ├── SubscriptionRegistryTest.php         — fixed/closure channels, event filter, unknown field
 ├── SubscriptionBroadcastDriverTest.php  — Broadcaster → driver → subscribers, inner driver still receives events
 ├── Support/SubscriptionFakeRedisServer.php — loopback TCP server playing Redis (records commands, writes RESP pushes)
-├── Redis/SubscriptionRedisSubscriberTest.php — RESP framing, split frames, error replies, closed connection, AUTH (child-process fake), real Redis when reachable
+├── Redis/SubscriptionRedisSubscriberTest.php — RESP framing, split frames, error replies, closed connection (also mid-frame: throws, no spinning), AUTH (child-process fake), real Redis when reachable
 ├── Redis/SubscriptionRedisRelayTest.php — relayed events reach a WS subscriber through LoopHooks; foreign messages skipped; decode()
-└── Sse/SubscriptionSseEndpointTest.php — query answers once, relayed subscription events, 4403 / validation errors as error events, GET/POST parsing
+└── Sse/SubscriptionSseEndpointTest.php — query answers once, relayed subscription events, ping despite foreign-channel traffic, 4403 / validation errors as error events, GET/POST parsing
 ```
 
 ---
@@ -349,8 +349,9 @@ Broadcast::setBroadcaster(new Broadcaster(new SubscriptionBroadcastDriver($manag
   `GraphQLTransportWsHandler` over an in-memory `Sse\BufferedConnection` (connection_init with the request's
   `Authorization` header as payload, then one `subscribe`), so validation, routing, authorization, context and
   limits are the same code. Each streaming request opens its own `RedisSubscriber` (`PSUBSCRIBE *`; the manager
-  does the routing), sends `ping` after `heartbeatSeconds` of silence and ends after `maxSeconds` (clients
-  reconnect). Queries and mutations answer once and never open Redis.
+  does the routing), sends `ping` after `heartbeatSeconds` without SSE output — measured on what the client
+  receives, not on Redis traffic, since `PSUBSCRIBE *` also delivers other channels' events — and ends after
+  `maxSeconds` (clients reconnect). Queries and mutations answer once and never open Redis.
 - **Execute per event, re-parse per event.** webonyx executes a `subscription` operation like a query
   with a root value; each event runs the stored document with the payload as root. The document is
   parsed again per event (via `GraphQLExecutor::execute()`), trading some CPU for reusing the graphql
@@ -376,7 +377,7 @@ Broadcast::setBroadcaster(new Broadcaster(new SubscriptionBroadcastDriver($manag
 - **Needs ez-php/websocket's subprotocol support.** The handler closes with 4406 unless the handshake
   negotiated `graphql-transport-ws`; the `Server` (or `websocket-tls`'s `TlsServer`) must be created
   with `subprotocols: [Protocol::SUBPROTOCOL]`. `closeWith()`/`subprotocol()` on `ConnectionInterface`
-  were added to ez-php/websocket for this module.
+  were added to ez-php/websocket for this module, `LoopHooks` in 2.6.0 — hence `ez-php/websocket: ^2.6` (and `ez-php/graphql: ^2.6` for `GraphQLExecutor::validate()` and `SchemaBuilder::subscription()`).
 
 ---
 

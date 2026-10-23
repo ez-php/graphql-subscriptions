@@ -114,6 +114,51 @@ final class SubscriptionSseEndpointTest extends TestCase
         $this->assertStringContainsString("event: complete\n", end($frames) ?: '');
     }
 
+    public function test_foreign_channel_traffic_does_not_hold_back_the_ping(): void
+    {
+        // A child process plays Redis and pushes an event for an unrelated channel every
+        // 200 ms — faster than the 1 s heartbeat, so a ping keyed on Redis silence never fires.
+        $server = stream_socket_server('tcp://127.0.0.1:0');
+        self::assertIsResource($server);
+        $name = (string) stream_socket_get_name($server, false);
+        $port = (int) substr($name, (int) strrpos($name, ':') + 1);
+        fclose($server);
+
+        $code = sprintf(
+            '$s = stream_socket_server("tcp://127.0.0.1:%d"); echo "ready\n"; $c = stream_socket_accept($s, 5); '
+            . 'fread($c, 1024); for ($i = 0; $i < 20; $i++) { @fwrite($c, %s); usleep(200000); }',
+            $port,
+            var_export(SubscriptionFakeRedisServer::pmessage('*', 'unrelated', '{"event":"tick","payload":{}}'), true),
+        );
+        $child = proc_open([PHP_BINARY, '-r', $code], [1 => ['pipe', 'w']], $pipes);
+        self::assertIsResource($child);
+        fgets($pipes[1]);
+
+        $schema = SubscriptionTestSchema::make();
+        $endpoint = new SseSubscriptionEndpoint(
+            $schema,
+            new GraphQLExecutor($schema),
+            (new SubscriptionRegistry())->channel('orderShipped', 'orders', 'shipped'),
+            static fn (): RedisSubscriber => new RedisSubscriber('127.0.0.1', $port),
+            heartbeatSeconds: 1,
+            maxSeconds: 3,
+        );
+
+        try {
+            $frames = $this->frames($endpoint->events(['query' => 'subscription { orderShipped }']));
+        } finally {
+            fclose($pipes[1]);
+            proc_terminate($child);
+            proc_close($child);
+        }
+
+        $pings = array_filter($frames, static fn (string $f): bool => str_contains($f, "event: ping\n"));
+        // One ping per second of output silence; keyed on Redis silence there would be at most
+        // one, from the short final wait before the deadline.
+        $this->assertGreaterThanOrEqual(2, count($pings));
+        $this->assertStringContainsString("event: complete\n", end($frames) ?: '');
+    }
+
     public function test_authorization_and_context_use_the_authorization_header(): void
     {
         $endpoint = $this->endpoint(

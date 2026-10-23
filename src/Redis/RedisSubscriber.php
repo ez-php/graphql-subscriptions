@@ -117,14 +117,14 @@ final class RedisSubscriber
         $except = null;
         $seconds = (int) floor($timeoutSeconds);
 
+        $closed = false;
+
         if (stream_select($read, $write, $except, $seconds, (int) (($timeoutSeconds - $seconds) * 1_000_000)) > 0) {
             while (($chunk = fread($this->socket, 65536)) !== false && $chunk !== '') {
                 $this->buffer .= $chunk;
             }
 
-            if (feof($this->socket) && $this->buffer === '') {
-                throw new SubscriptionException('Redis closed the subscriber connection.');
-            }
+            $closed = feof($this->socket);
         }
 
         $messages = [];
@@ -139,6 +139,13 @@ final class RedisSubscriber
             } elseif (($frame[0] ?? null) === 'message' && is_string($frame[1] ?? null) && is_string($frame[2] ?? null)) {
                 $messages[] = ['channel' => $frame[1], 'message' => $frame[2]];
             }
+        }
+
+        // At EOF no more bytes arrive: hand out what was complete, then fail on the next
+        // call — a partial frame left in the buffer can never complete, and a closed socket
+        // stays readable, so returning [] would let an event loop spin on it.
+        if ($closed && $messages === []) {
+            throw new SubscriptionException('Redis closed the subscriber connection.');
         }
 
         return $messages;

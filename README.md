@@ -128,7 +128,7 @@ $endpoint = new SseSubscriptionEndpoint(
 $router->get('/graphql/stream', $endpoint);   // ?query=…&variables={…}  (or POST a JSON body)
 ```
 
-Events: `next` (the execution result), `error`, `complete`, and `ping` as a keep-alive. The `Authorization` header is handed to `authorize`/`context` as the `connection_init` payload, so the same rules apply as on the WebSocket.
+Events: `next` (the execution result), `error`, `complete`, and `ping` as a keep-alive once `heartbeatSeconds` pass without any other event (traffic on unrelated channels does not count). The `Authorization` header is handed to `authorize`/`context` as the `connection_init` payload, so the same rules apply as on the WebSocket.
 
 ## Limitations
 
