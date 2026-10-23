@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "ez-php/broadcast",
-            "version": "2.5.9",
+            "version": "2.5.10",
             "source": {
                 "type": "git",
                 "url": "https://github.com/ez-php/broadcast.git",
-                "reference": "2f1a2cad5743ecb0cb7b80f14c254a7c0233a72b"
+                "reference": "d9fdc9f031f19715e47c8e0fe1c981594cb2b65b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/ez-php/broadcast/zipball/2f1a2cad5743ecb0cb7b80f14c254a7c0233a72b",
-                "reference": "2f1a2cad5743ecb0cb7b80f14c254a7c0233a72b",
+                "url": "https://api.github.com/repos/ez-php/broadcast/zipball/d9fdc9f031f19715e47c8e0fe1c981594cb2b65b",
+                "reference": "d9fdc9f031f19715e47c8e0fe1c981594cb2b65b",
                 "shasum": ""
             },
             "require": {
@@ -68,7 +68,7 @@
                 "issues": "https://github.com/ez-php/broadcast/issues",
                 "source": "https://github.com/ez-php/broadcast"
             },
-            "time": "2026-10-20T21:07:28+00:00"
+            "time": "2026-10-23T12:36:17+00:00"
         },
         {
             "name": "ez-php/contracts",
