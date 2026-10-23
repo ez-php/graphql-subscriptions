@@ -21,6 +21,7 @@
     "webonyx/graphql-php": "^15.0",
     "ez-php/broadcast": "^2.0",
     "ez-php/graphql": "^2.0",
+    "ez-php/http": "^2.0",
     "ez-php/websocket": "^2.0"
   },
   "require-dev": {

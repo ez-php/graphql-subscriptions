@@ -282,7 +282,13 @@ src/
 ├── Subscription.php                — readonly active subscription: connection, id, document, variables, route, context
 ├── SubscriptionManager.php         — active subscriptions per connection; publish() executes matches and sends `next`
 ├── SubscriptionBroadcastDriver.php — BroadcastDriverInterface feeding the manager, optionally decorating an inner driver
-├── Protocol.php                    — subprotocol name, 44xx close codes, JSON message encoding
+├── Protocol.php                    — subprotocol name, 44xx close codes (incl. 4408 init timeout), JSON message encoding
+├── Redis/
+│   ├── RedisSubscriber.php         — RESP Pub/Sub consumer on a plain socket (PSUBSCRIBE, AUTH, split-frame buffering); no ext-redis
+│   └── RedisBroadcastRelay.php     — broadcast RedisDriver JSON → SubscriptionManager::publish(); attach() registers it with LoopHooks
+├── Sse/
+│   ├── SseSubscriptionEndpoint.php — SSE fallback route handler: one operation per request over the WS handler, Redis-fed, ping/maxSeconds
+│   └── BufferedConnection.php      — @internal in-memory ConnectionInterface collecting the handler's protocol messages
 ├── MessageType.php                 — enum of graphql-transport-ws message types
 └── SubscriptionException.php       — unroutable subscription field / invalid variables
 
@@ -293,7 +299,11 @@ tests/
 ├── GraphQLTransportWsHandlerTest.php    — protocol flow: ack, 4400/4401/4403/4406/4409/4429, single-result ops, routing, context, per-connection limit
 ├── SubscriptionManagerTest.php          — event matching, payload as root value, errors in `next`, dropping closed connections
 ├── SubscriptionRegistryTest.php         — fixed/closure channels, event filter, unknown field
-└── SubscriptionBroadcastDriverTest.php  — Broadcaster → driver → subscribers, inner driver still receives events
+├── SubscriptionBroadcastDriverTest.php  — Broadcaster → driver → subscribers, inner driver still receives events
+├── Support/SubscriptionFakeRedisServer.php — loopback TCP server playing Redis (records commands, writes RESP pushes)
+├── Redis/SubscriptionRedisSubscriberTest.php — RESP framing, split frames, error replies, closed connection, AUTH (child-process fake), real Redis when reachable
+├── Redis/SubscriptionRedisRelayTest.php — relayed events reach a WS subscriber through LoopHooks; foreign messages skipped; decode()
+└── Sse/SubscriptionSseEndpointTest.php — query answers once, relayed subscription events, 4403 / validation errors as error events, GET/POST parsing
 ```
 
 ---
@@ -325,12 +335,22 @@ Broadcast::setBroadcaster(new Broadcaster(new SubscriptionBroadcastDriver($manag
 
 ## Design Decisions and Constraints
 
-- **Same-process delivery only (first pass).** `ez-php/broadcast` drivers only publish — there is no
-  subscribe side — and the WebSocket server loop has no hook for external event sources. Events
-  therefore reach subscriptions only when published inside the WebSocket process: typically from a
-  mutation sent over the same protocol (`subscribe` with a mutation runs once), whose resolver calls
-  `Broadcast::to()`. Cross-process delivery (HTTP app → Redis → WS process) and an SSE fallback need a
-  consumer for Redis Pub/Sub and are tracked in `TODO.md`, not built here.
+- **Two delivery paths, one format.** Inside the WebSocket process, `SubscriptionBroadcastDriver` feeds
+  `Broadcast::to()` calls straight into the manager. From other processes (the HTTP app, workers), events
+  travel through Redis: they publish with `ez-php/broadcast`'s `RedisDriver` (JSON `{"event","payload"}`), and
+  `Redis\RedisBroadcastRelay` consumes that format and calls `SubscriptionManager::publish()` — no new
+  pub/sub layer. `ez-php/broadcast` drivers only publish, so the relay brings its own subscriber.
+- **`RedisSubscriber` speaks RESP over a plain socket instead of using ext-redis.** phpredis'
+  `subscribe()` blocks the process inside a callback, which an event loop cannot multiplex. The socket is
+  registered with `ez-php/websocket`'s `LoopHooks` (`$server->hooks()->addReadStream()`, added to both
+  `Server` and `TlsServer` for this), and `read($timeout)` parses complete frames (split frames stay
+  buffered). Only `PSUBSCRIBE`/`AUTH` and the push frames are implemented — it is a consumer, not a client.
+- **The SSE fallback reuses the WebSocket handler.** `Sse\SseSubscriptionEndpoint` drives
+  `GraphQLTransportWsHandler` over an in-memory `Sse\BufferedConnection` (connection_init with the request's
+  `Authorization` header as payload, then one `subscribe`), so validation, routing, authorization, context and
+  limits are the same code. Each streaming request opens its own `RedisSubscriber` (`PSUBSCRIBE *`; the manager
+  does the routing), sends `ping` after `heartbeatSeconds` of silence and ends after `maxSeconds` (clients
+  reconnect). Queries and mutations answer once and never open Redis.
 - **Execute per event, re-parse per event.** webonyx executes a `subscription` operation like a query
   with a root value; each event runs the stored document with the payload as root. The document is
   parsed again per event (via `GraphQLExecutor::execute()`), trading some CPU for reusing the graphql
@@ -349,9 +369,10 @@ Broadcast::setBroadcaster(new Broadcaster(new SubscriptionBroadcastDriver($manag
   unbounded work. A subscribe beyond the cap gets an `error` message, not a close: the protocol reserves
   closes for violations, and the client may `complete` one and retry. Query size/depth stay with
   `ez-php/graphql`'s executor limits.
-- **No connection-init timeout (4408).** The protocol asks the server to close connections that never
-  send `connection_init`; ez-php/websocket's loop has no timers. Unacknowledged connections cannot
-  subscribe (4401), so the gap only affects idle sockets.
+- **Connection-init timeout (4408) via the loop's tick.** With `initTimeoutSeconds` set, `onOpen()` records
+  the connection and `tick()` — registered with `$server->hooks()->onTick($handler->tick(...))` — closes it
+  with 4408 once the timeout passes without `connection_init`. Without the argument (or without registering
+  `tick()`), nothing times out; unacknowledged connections still cannot subscribe (4401).
 - **Needs ez-php/websocket's subprotocol support.** The handler closes with 4406 unless the handshake
   negotiated `graphql-transport-ws`; the `Server` (or `websocket-tls`'s `TlsServer`) must be created
   with `subprotocols: [Protocol::SUBPROTOCOL]`. `closeWith()`/`subprotocol()` on `ConnectionInterface`
@@ -361,7 +382,10 @@ Broadcast::setBroadcaster(new Broadcaster(new SubscriptionBroadcastDriver($manag
 
 ## Testing Approach
 
-- No external infrastructure. `Support\SubscriptionFakeConnection` replaces the socket and records
+- Redis is replaced by `Support\SubscriptionFakeRedisServer`, a loopback TCP server writing RESP pushes (AUTH,
+  whose reply the constructor waits for, uses a one-shot child-process fake); one test also talks to a real
+  Redis at `REDIS_HOST`/`REDIS_PORT` and skips when there is none.
+- No other infrastructure. `Support\SubscriptionFakeConnection` replaces the socket and records
   every message (JSON-decoded) plus the close code; the handler is driven by feeding `Frame`s to
   `onMessage()`. Execution uses a real `GraphQLExecutor` over `Support\SubscriptionTestSchema`.
 - Test classes live in the shared `Tests\` namespace but must be uniquely named
@@ -378,6 +402,6 @@ Broadcast::setBroadcaster(new Broadcaster(new SubscriptionBroadcastDriver($manag
 | Schema building, query execution, depth/complexity limits | `ez-php/graphql` (`SchemaBuilder::subscription()`, `GraphQLExecutor`) |
 | WebSocket transport, handshake, subprotocol negotiation | `ez-php/websocket` / `ez-php/websocket-tls` |
 | Event publishing, channel authorization | `ez-php/broadcast` |
-| Cross-process event delivery (Redis Pub/Sub consumer), SSE fallback | Not built yet — `TODO.md` |
+| A general-purpose Redis client (commands beyond PSUBSCRIBE/AUTH) | ext-redis / `ez-php/cache`'s `RedisDriver` |
 | The legacy `subscriptions-transport-ws` (Apollo) protocol | Not supported — deprecated upstream |
 | Running the server process (supervisor, signals) | Application / deployment |

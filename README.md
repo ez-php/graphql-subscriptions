@@ -92,10 +92,48 @@ Pass `maxSubscriptionsPerConnection: 20` (default `null`, unlimited) to cap how 
 
 A `subscribe` message carrying a query or mutation is executed once and answered with `next` + `complete`, so a client can send mutations over the same socket — their `Broadcast::to()` calls then reach subscribers in the same process.
 
+### Events from other processes (Redis)
+
+Your HTTP application and workers publish with `ez-php/broadcast`'s Redis driver as usual; the WebSocket process relays those events to its subscribers:
+
+```php
+use EzPhp\GraphQLSubscriptions\Redis\RedisBroadcastRelay;
+use EzPhp\GraphQLSubscriptions\Redis\RedisSubscriber;
+
+$server = new Server('0.0.0.0', 8080, subprotocols: [Protocol::SUBPROTOCOL]);
+$handler = new GraphQLTransportWsHandler($schema, $executor, $registry, $manager, initTimeoutSeconds: 10);
+
+(new RedisBroadcastRelay(new RedisSubscriber('redis', 6379), $manager))->attach($server->hooks());
+$server->hooks()->onTick($handler->tick(...));   // closes connections without connection_init (4408)
+
+$server->run($handler);
+```
+
+`RedisSubscriber` speaks Redis' wire protocol over a plain socket (no ext-redis needed); pass a password as third argument when Redis requires `AUTH`. Works the same with `ez-php/websocket-tls`'s `TlsServer`.
+
+### SSE fallback
+
+For clients without WebSockets, `SseSubscriptionEndpoint` streams one operation per HTTP request as server-sent events:
+
+```php
+use EzPhp\GraphQLSubscriptions\Sse\SseSubscriptionEndpoint;
+
+$endpoint = new SseSubscriptionEndpoint(
+    $schema, $executor, $registry,
+    fn (): RedisSubscriber => new RedisSubscriber('redis', 6379),
+    authorize: fn ($conn, array $init): bool => verifyToken($init['authorization'] ?? ''),
+    heartbeatSeconds: 15,
+    maxSeconds: 300,
+);
+$router->get('/graphql/stream', $endpoint);   // ?query=…&variables={…}  (or POST a JSON body)
+```
+
+Events: `next` (the execution result), `error`, `complete`, and `ping` as a keep-alive. The `Authorization` header is handed to `authorize`/`context` as the `connection_init` payload, so the same rules apply as on the WebSocket.
+
 ## Limitations
 
-- **Same process only.** Events must be published inside the WebSocket server process. Delivery from a separate HTTP process (via Redis Pub/Sub) and an SSE fallback are not implemented yet.
-- No connection-init timeout (4408): `ez-php/websocket` has no timers. Unacknowledged connections still cannot subscribe.
+- Relayed and SSE delivery need Redis (published through `ez-php/broadcast`'s Redis driver); without it, only events published inside the WebSocket process reach subscribers.
+- Each SSE request holds one PHP worker and one Redis connection for its lifetime — size PHP-FPM accordingly, or prefer the WebSocket.
 - The legacy `subscriptions-transport-ws` (Apollo) protocol is not supported.
 
 ## License

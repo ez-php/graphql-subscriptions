@@ -269,6 +269,35 @@ final class GraphQLTransportWsHandlerTest extends TestCase
         $this->assertSame(2, $this->manager->count());
     }
 
+    public function testUninitialisedConnectionsAreClosedWith4408AfterTheTimeout(): void
+    {
+        $schema = SubscriptionTestSchema::make();
+        $handler = new GraphQLTransportWsHandler($schema, new GraphQLExecutor($schema), new SubscriptionRegistry(), $this->manager, initTimeoutSeconds: 3);
+        $idle = new SubscriptionFakeConnection('idle');
+        $ready = new SubscriptionFakeConnection('ready');
+        $handler->onOpen($idle);
+        $handler->onOpen($ready);
+        $this->send($handler, $ready, ['type' => 'connection_init']);
+
+        $handler->tick(microtime(true) + 1);
+        $this->assertNull($idle->closeCode);
+
+        $handler->tick(microtime(true) + 5);
+        $this->assertSame(4408, $idle->closeCode);
+        $this->assertNull($ready->closeCode);
+    }
+
+    public function testTickIsANoOpWithoutAnInitTimeout(): void
+    {
+        $conn = new SubscriptionFakeConnection();
+        $handler = $this->handler();
+        $handler->onOpen($conn);
+
+        $handler->tick(microtime(true) + 3600);
+
+        $this->assertNull($conn->closeCode);
+    }
+
     public function testValidationErrorsAreSentAsErrorMessage(): void
     {
         $conn = new SubscriptionFakeConnection();

@@ -29,6 +29,8 @@ final class Protocol
 
     public const int CLOSE_SUBPROTOCOL_NOT_ACCEPTABLE = 4406;
 
+    public const int CLOSE_INIT_TIMEOUT = 4408;
+
     public const int CLOSE_SUBSCRIBER_EXISTS = 4409;
 
     public const int CLOSE_TOO_MANY_INIT_REQUESTS = 4429;

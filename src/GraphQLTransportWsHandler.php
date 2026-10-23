@@ -50,6 +50,13 @@ final class GraphQLTransportWsHandler implements HandlerInterface
     private array $contexts = [];
 
     /**
+     * Connections still waiting for `connection_init`: id => [connection, opened at].
+     *
+     * @var array<string, array{ConnectionInterface, float}>
+     */
+    private array $pending = [];
+
+    /**
      * @param Schema                                                    $schema    The schema the executor runs against (subscription field lookup).
      * @param GraphQLExecutor                                           $executor  Validates and executes operations.
      * @param SubscriptionRegistry                                      $registry  Subscription field → broadcast channel.
@@ -60,6 +67,8 @@ final class GraphQLTransportWsHandler implements HandlerInterface
      *                                                                             once per connection. Null passes no context.
      * @param int|null                                                  $maxSubscriptionsPerConnection Active subscriptions one connection may hold;
      *                                                                             a subscribe beyond it gets an `error` message. Null = no limit.
+     * @param int|null                                                  $initTimeoutSeconds Seconds a connection may stay without `connection_init`
+     *                                                                             before tick() closes it with 4408. Null = no timeout.
      */
     public function __construct(
         private readonly Schema $schema,
@@ -69,7 +78,32 @@ final class GraphQLTransportWsHandler implements HandlerInterface
         private readonly ?Closure $authorize = null,
         private readonly ?Closure $context = null,
         private readonly ?int $maxSubscriptionsPerConnection = null,
+        private readonly ?int $initTimeoutSeconds = null,
     ) {
+    }
+
+    /**
+     * Close connections that did not send `connection_init` within the init timeout (4408).
+     * Register it with the server loop: `$server->hooks()->onTick($handler->tick(...))`.
+     *
+     * @param float|null $now Current time (microtime(true)); injectable for tests.
+     *
+     * @return void
+     */
+    public function tick(?float $now = null): void
+    {
+        if ($this->initTimeoutSeconds === null) {
+            return;
+        }
+
+        $now ??= microtime(true);
+
+        foreach ($this->pending as $id => [$conn, $openedAt]) {
+            if ($now - $openedAt >= $this->initTimeoutSeconds) {
+                unset($this->pending[$id]);
+                $conn->closeWith(Protocol::CLOSE_INIT_TIMEOUT, 'Connection initialisation timeout');
+            }
+        }
     }
 
     /**
@@ -79,6 +113,12 @@ final class GraphQLTransportWsHandler implements HandlerInterface
     {
         if ($conn->subprotocol() !== Protocol::SUBPROTOCOL) {
             $conn->closeWith(Protocol::CLOSE_SUBPROTOCOL_NOT_ACCEPTABLE, 'Subprotocol not acceptable');
+
+            return;
+        }
+
+        if ($this->initTimeoutSeconds !== null) {
+            $this->pending[$conn->id()] = [$conn, microtime(true)];
         }
     }
 
@@ -113,7 +153,7 @@ final class GraphQLTransportWsHandler implements HandlerInterface
     public function onClose(ConnectionInterface $conn): void
     {
         $this->manager->removeAll($conn);
-        unset($this->initialised[$conn->id()], $this->contexts[$conn->id()]);
+        unset($this->initialised[$conn->id()], $this->contexts[$conn->id()], $this->pending[$conn->id()]);
     }
 
     /**
@@ -139,6 +179,7 @@ final class GraphQLTransportWsHandler implements HandlerInterface
         }
 
         $this->initialised[$conn->id()] = true;
+        unset($this->pending[$conn->id()]);
 
         $payload = $message['payload'] ?? [];
 
