@@ -290,7 +290,7 @@ tests/
 ├── TestCase.php                         — Base PHPUnit test case (identical in every package)
 ├── Support/SubscriptionFakeConnection.php — recording ConnectionInterface (messages, close code, subprotocol)
 ├── Support/SubscriptionTestSchema.php   — schema fixture with Query/Mutation/Subscription fields
-├── GraphQLTransportWsHandlerTest.php    — protocol flow: ack, 4400/4401/4403/4406/4409/4429, single-result ops, routing, context
+├── GraphQLTransportWsHandlerTest.php    — protocol flow: ack, 4400/4401/4403/4406/4409/4429, single-result ops, routing, context, per-connection limit
 ├── SubscriptionManagerTest.php          — event matching, payload as root value, errors in `next`, dropping closed connections
 ├── SubscriptionRegistryTest.php         — fixed/closure channels, event filter, unknown field
 └── SubscriptionBroadcastDriverTest.php  — Broadcaster → driver → subscribers, inner driver still receives events
@@ -343,6 +343,12 @@ Broadcast::setBroadcaster(new Broadcaster(new SubscriptionBroadcastDriver($manag
   subscribe time are an `error` message; only protocol violations close the socket.
 - **Routing errors are client-visible.** `SubscriptionException` messages (unregistered field,
   invalid variables) are sent in the `error` message — they describe the request, not server internals.
+- **Optional per-connection subscription limit.** `GraphQLTransportWsHandler`'s last constructor argument,
+  `maxSubscriptionsPerConnection` (null = unlimited), caps how many subscriptions one socket may hold. Each
+  one is re-executed on every matching broadcast event, so an authorised client could otherwise register
+  unbounded work. A subscribe beyond the cap gets an `error` message, not a close: the protocol reserves
+  closes for violations, and the client may `complete` one and retry. Query size/depth stay with
+  `ez-php/graphql`'s executor limits.
 - **No connection-init timeout (4408).** The protocol asks the server to close connections that never
   send `connection_init`; ez-php/websocket's loop has no timers. Unacknowledged connections cannot
   subscribe (4401), so the gap only affects idle sockets.

@@ -86,6 +86,8 @@ new GraphQLTransportWsHandler(
 
 `authorize` returning anything but `true` closes with 4403. The `context` value reaches every resolver of that connection as its third argument.
 
+Pass `maxSubscriptionsPerConnection: 20` (default `null`, unlimited) to cap how many subscriptions one socket may hold; a `subscribe` beyond the cap is answered with an `error` message and the socket stays open.
+
 ### Queries and mutations
 
 A `subscribe` message carrying a query or mutation is executed once and answered with `next` + `complete`, so a client can send mutations over the same socket — their `Broadcast::to()` calls then reach subscribers in the same process.

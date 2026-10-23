@@ -49,7 +49,7 @@ final class GraphQLTransportWsHandlerTest extends TestCase
      * @param (Closure(ConnectionInterface, array<string, mixed>): bool)|null  $authorize
      * @param (Closure(ConnectionInterface, array<string, mixed>): mixed)|null $context
      */
-    private function handler(?Closure $authorize = null, ?Closure $context = null): GraphQLTransportWsHandler
+    private function handler(?Closure $authorize = null, ?Closure $context = null, ?int $maxSubscriptions = null): GraphQLTransportWsHandler
     {
         $schema = SubscriptionTestSchema::make();
         $registry = (new SubscriptionRegistry())
@@ -57,7 +57,7 @@ final class GraphQLTransportWsHandlerTest extends TestCase
             ->channel('orderUpdated', fn (array $args): string => 'orders.' . (is_string($args['id']) ? $args['id'] : ''))
             ->channel('whoAmI', 'users');
 
-        return new GraphQLTransportWsHandler($schema, new GraphQLExecutor($schema), $registry, $this->manager, $authorize, $context);
+        return new GraphQLTransportWsHandler($schema, new GraphQLExecutor($schema), $registry, $this->manager, $authorize, $context, $maxSubscriptions);
     }
 
     /**
@@ -243,6 +243,30 @@ final class GraphQLTransportWsHandlerTest extends TestCase
         $this->send($handler, $conn, $subscribe);
 
         $this->assertSame(4409, $conn->closeCode);
+    }
+
+    public function testSubscriptionsBeyondThePerConnectionLimitAreRejected(): void
+    {
+        $conn = new SubscriptionFakeConnection();
+        $other = new SubscriptionFakeConnection('conn-2');
+        $handler = $this->handler(maxSubscriptions: 1);
+        $this->acknowledged($handler, $conn);
+        $this->acknowledged($handler, $other);
+        $query = ['query' => 'subscription { orderShipped }'];
+
+        $this->send($handler, $conn, ['type' => 'subscribe', 'id' => 'a', 'payload' => $query]);
+        $this->send($handler, $conn, ['type' => 'subscribe', 'id' => 'b', 'payload' => $query]);
+        $this->send($handler, $other, ['type' => 'subscribe', 'id' => 'a', 'payload' => $query]);
+
+        $this->assertSame(2, $this->manager->count());
+        $this->assertSame('error', $conn->lastMessage()['type'] ?? null);
+        $this->assertSame('b', $conn->lastMessage()['id'] ?? null);
+        $this->assertNull($conn->closeCode);
+
+        // Completing one frees the slot again.
+        $this->send($handler, $conn, ['type' => 'complete', 'id' => 'a']);
+        $this->send($handler, $conn, ['type' => 'subscribe', 'id' => 'b', 'payload' => $query]);
+        $this->assertSame(2, $this->manager->count());
     }
 
     public function testValidationErrorsAreSentAsErrorMessage(): void

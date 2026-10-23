@@ -58,6 +58,8 @@ final class GraphQLTransportWsHandler implements HandlerInterface
      *                                                                             false closes with 4403. Null accepts everyone.
      * @param (Closure(ConnectionInterface, array<string, mixed>): mixed)|null $context   Builds the resolver context (third resolver argument)
      *                                                                             once per connection. Null passes no context.
+     * @param int|null                                                  $maxSubscriptionsPerConnection Active subscriptions one connection may hold;
+     *                                                                             a subscribe beyond it gets an `error` message. Null = no limit.
      */
     public function __construct(
         private readonly Schema $schema,
@@ -66,6 +68,7 @@ final class GraphQLTransportWsHandler implements HandlerInterface
         private readonly SubscriptionManager $manager,
         private readonly ?Closure $authorize = null,
         private readonly ?Closure $context = null,
+        private readonly ?int $maxSubscriptionsPerConnection = null,
     ) {
     }
 
@@ -210,6 +213,14 @@ final class GraphQLTransportWsHandler implements HandlerInterface
         if ($operation->operation !== 'subscription') {
             $conn->send(Protocol::encode(MessageType::Next, $id, $this->executor->execute($query, $variables, $operationName, $context)));
             $conn->send(Protocol::encode(MessageType::Complete, $id));
+
+            return;
+        }
+
+        if ($this->maxSubscriptionsPerConnection !== null && $this->manager->countFor($conn) >= $this->maxSubscriptionsPerConnection) {
+            $conn->send(Protocol::encode(MessageType::Error, $id, [[
+                'message' => sprintf('Too many subscriptions on this connection (limit %d).', $this->maxSubscriptionsPerConnection),
+            ]]));
 
             return;
         }

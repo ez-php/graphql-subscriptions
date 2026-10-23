@@ -89,6 +89,18 @@ final class SubscriptionManager
     }
 
     /**
+     * Number of active subscriptions of one connection.
+     *
+     * @param ConnectionInterface $connection
+     *
+     * @return int
+     */
+    public function countFor(ConnectionInterface $connection): int
+    {
+        return count($this->subscriptions[$connection->id()] ?? []);
+    }
+
+    /**
      * Number of active subscriptions across all connections.
      *
      * @return int
