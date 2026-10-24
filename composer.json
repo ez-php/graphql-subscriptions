@@ -19,13 +19,13 @@
   "require": {
     "php": "^8.5",
     "webonyx/graphql-php": "^15.0",
-    "ez-php/broadcast": "^2.0",
-    "ez-php/graphql": "^2.6",
-    "ez-php/http": "^2.0",
-    "ez-php/websocket": "^2.6"
+    "ez-php/broadcast": "^2.6.0",
+    "ez-php/graphql": "^2.6.0",
+    "ez-php/http": "^2.6.0",
+    "ez-php/websocket": "^2.6.0"
   },
   "require-dev": {
-    "ez-php/docker": "^2.0",
+    "ez-php/docker": "^2.6.0",
     "phpunit/phpunit": "^13.0",
     "phpstan/phpstan": "^2.1",
     "friendsofphp/php-cs-fixer": "^3.94",
