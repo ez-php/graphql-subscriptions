@@ -1,6 +1,6 @@
 {
   "name": "ez-php/graphql-subscriptions",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "description": "GraphQL subscriptions over ez-php/websocket (graphql-transport-ws), fed by ez-php/broadcast",
   "type": "library",
   "license": "MIT",
