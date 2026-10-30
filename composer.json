@@ -1,6 +1,6 @@
 {
   "name": "ez-php/graphql-subscriptions",
-  "version": "2.6.5",
+  "version": "2.7.0",
   "description": "GraphQL subscriptions over ez-php/websocket (graphql-transport-ws), fed by ez-php/broadcast",
   "type": "library",
   "license": "MIT",
@@ -19,13 +19,13 @@
   "require": {
     "php": "^8.5",
     "webonyx/graphql-php": "^15.0",
-    "ez-php/broadcast": "^2.6.0",
-    "ez-php/graphql": "^2.6.0",
-    "ez-php/http": "^2.6.0",
-    "ez-php/websocket": "^2.6.0"
+    "ez-php/broadcast": "^2.7.0",
+    "ez-php/graphql": "^2.7.0",
+    "ez-php/http": "^2.7.0",
+    "ez-php/websocket": "^2.7.0"
   },
   "require-dev": {
-    "ez-php/docker": "^2.6.0",
+    "ez-php/docker": "^2.7.0",
     "phpunit/phpunit": "^13.0",
     "phpstan/phpstan": "^2.1",
     "friendsofphp/php-cs-fixer": "^3.94",
